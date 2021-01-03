@@ -9,19 +9,26 @@ import (
 	"io/ioutil"
 	"os"
 
-	csv2 "bz.epi.covid/munging/csv"
+	log "github.com/sirupsen/logrus"
+
 	"bz.epi.covid/munging/godata"
 )
 
 func main() {
+
+	log.SetFormatter(&log.JSONFormatter{PrettyPrint: true})
+	log.SetOutput(os.Stdout)
+
 	var username string
 	var password string
 	var fileName string
 	var destFile string
+	var outbreak string
 	flag.StringVar(&username, "u", "", "Specify godata username file.")
 	flag.StringVar(&password, "p", "", "Specify godata password file.")
 	flag.StringVar(&fileName, "f", "", "Specify csv file.")
 	flag.StringVar(&destFile, "d", "", "Specify destination file.")
+	flag.StringVar(&outbreak, "o", "", "Specify outbreak id.")
 	flag.Parse()
 
 	if len(username) == 0 {
@@ -52,11 +59,22 @@ func main() {
 	}
 
 	r := csv.NewReader(csvFile)
-	tests, err := csv2.Read(r, locs)
+	tests, err := godata.Read(r, locs)
 	jsonFile, _ := json.MarshalIndent(tests, "", "    ")
 	err = ioutil.WriteFile(destFile, jsonFile, os.ModePerm)
 	if err != nil {
 		panic(fmt.Errorf("failed to write to json: %w", err))
+	}
+
+	// Post To GoData
+	for _, t := range tests {
+		err := godata.PostTest(authResp.Response.AccessToken, outbreak, t)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"test":     t,
+				"outbreak": outbreak,
+			}).WithError(err).Error("failed to post new outbreak")
+		}
 	}
 
 }

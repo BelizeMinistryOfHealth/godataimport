@@ -1,4 +1,4 @@
-package csv
+package godata
 
 import (
 	"encoding/csv"
@@ -6,8 +6,6 @@ import (
 	"io"
 	"strconv"
 	"time"
-
-	"bz.epi.covid/munging/godata"
 )
 
 const (
@@ -22,6 +20,9 @@ type GoDataCaseForm struct {
 	Value []string `json:"value"`
 }
 
+// GoDataQuestionnaire represents the GoData questionnaire. GoData stores these as a flat list.
+// The CaseForm identifies the forms, and GoData uses this to extract the fields for each form from the
+// flat list of questions.
 type GoDataQuestionnaire struct {
 	CaseForm                                      []GoDataCaseForm      `json:"Case_WhichForm"`
 	DataCollectorName                             []QuestionnaireAnswer `json:"FA0_datacollector_name"`
@@ -59,29 +60,31 @@ type GoDataQuestionnaire struct {
 	PurposeOfTravel                               []QuestionnaireAnswer `json:"FA0_priorXdayexposure_purposeoftravel"`
 	FlightNumber                                  []QuestionnaireAnswer `json:"FA0_priorXdayexposure_flightnumber"`
 	PcrTestInPast72Hours                          []QuestionnaireAnswer `json:"FA0_priorXdayexposure_tookpcrtest_past72hours"`
-	DeathContrib                                  string                `json:"FA2_outcome_deathnCoVcontribution"`
-	PostMortem                                    string                `json:"FA2_outcome_portmortemperformed"`
-	CauseOfDeath                                  string                `json:"FA2_symptoms_causeofdeath"`
+	DeathContrib                                  []QuestionnaireAnswer `json:"FA2_outcome_deathnCoVcontribution"`
+	PostMortem                                    []QuestionnaireAnswer `json:"FA2_outcome_postmortemperformed"`
+	CauseOfDeath                                  []QuestionnaireAnswer `json:"FA2_symptoms_causeofdeath"`
 	RespSampleCollected                           []QuestionnaireAnswer `json:"FA0_respiratorysample_collectedYN"`
 	MechanicalVentilation                         []QuestionnaireAnswer `json:"FA0_clinicalcomplications_mechanicalventilation"`
-	PuiId                                         string                `json:"pui_id"`
-	InterviewKey                                  string                `json:"interviewKey"`
-	CaseNo                                        string                `json:"case_no"`
-	ID2                                           string                `json:"ID2"`
 }
 
 const AddressType = "LNG_REFERENCE_DATA_CATEGORY_ADDRESS_TYPE_USUAL_PLACE_OF_RESIDENCE"
 const OtherAddressType = "LNG_REFERENCE_DATA_CATEGORY_ADDRESS_TYPE_OTHER"
 
+type GeoLocation struct {
+	Lat float32 `json:"lat"`
+	Lng float32 `json:"lng"`
+}
+
 type Address struct {
-	TypeId       string `json:"typeId"`
-	Country      string `json:"country"`
-	City         string `json:"city"`
-	AddressLine1 string `json:"addressLine1"`
-	AddressLine2 string `json:"addressLine2"`
-	Date         string `json:"date"`
-	PhoneNumber  string `json:"phoneNumber"`
-	LocationId   string `json:"locationId"`
+	TypeId       string       `json:"typeId"`
+	Country      string       `json:"country"`
+	City         string       `json:"city"`
+	AddressLine1 string       `json:"addressLine1"`
+	AddressLine2 string       `json:"addressLine2"`
+	Date         string       `json:"date"`
+	PhoneNumber  string       `json:"phoneNumber"`
+	LocationId   string       `json:"locationId"`
+	GeoLocation  *GeoLocation `json:"geoLocation"`
 }
 
 type PersonAge struct {
@@ -92,6 +95,8 @@ type PersonAge struct {
 const CaseSuspectClassification = "LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_SUSPECT"
 const CaseConfirmedClassification = "LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED"
 
+// toClassification converts a string to the corresponding classification string that GoData expects.
+// Returns an empty string if the input is invalid.
 func toClassification(s string) (string, error) {
 	switch s {
 	case "Confirmed":
@@ -137,7 +142,7 @@ func toOutcome(s string) (string, error) {
 }
 
 type CovidTest struct {
-	ID             string              `json:"id"`
+	VisualID       string              `json:"visualId"`
 	Bhis           int                 `json:"bhis"`
 	ReportingDate  time.Time           `json:"dateOfReporting"`
 	CreatedAt      time.Time           `json:"createdAt"`
@@ -155,15 +160,16 @@ type CovidTest struct {
 	Outcome        string              `json:"outcome"`
 	DateOfOutcome  *time.Time          `json:"dateOfOutCome"`
 	Addresses      []Address           `json:"addresses"`
-	Questionnaire  GoDataQuestionnaire `json:"questionnaireAnswers"`
+	Questionnaire  GoDataQuestionnaire `json:"questionnaireAnswers,omitempty"`
 }
 
-func toCurrentAddress(r []string, locs []godata.AddressLocation) (*Address, error) {
-	loc := godata.FindLocation(r[24], locs)
+func toCurrentAddress(r []string, locs []AddressLocation) (*Address, error) {
+	loc := FindLocation(r[24], locs)
 	if loc == nil {
 		return nil, fmt.Errorf("invalid address %s", r[24])
 	}
-
+	lat, _ := strconv.ParseFloat(r[28], 32)
+	lng, _ := strconv.ParseFloat(r[29], 32)
 	addr := Address{
 		TypeId:       AddressType,
 		Country:      "Belize",
@@ -173,12 +179,16 @@ func toCurrentAddress(r []string, locs []godata.AddressLocation) (*Address, erro
 		Date:         "",
 		PhoneNumber:  r[11],
 		LocationId:   loc.Id,
+		GeoLocation: &GeoLocation{
+			Lat: float32(lat),
+			Lng: float32(lng),
+		},
 	}
 	return &addr, nil
 }
 
-func toOtherAddress(r []string, locs []godata.AddressLocation) (*Address, error) {
-	loc := godata.FindLocation(r[33], locs)
+func toOtherAddress(r []string, locs []AddressLocation) (*Address, error) {
+	loc := FindLocation(r[33], locs)
 	if loc == nil {
 		return nil, fmt.Errorf("invalid address %s", r[33])
 	}
@@ -197,7 +207,7 @@ func toOtherAddress(r []string, locs []godata.AddressLocation) (*Address, error)
 }
 
 // Read files from a csv file generated from a postgres table
-func Read(r *csv.Reader, locs []godata.AddressLocation) ([]CovidTest, error) {
+func Read(r *csv.Reader, locs []AddressLocation) ([]CovidTest, error) {
 	var tests []CovidTest
 	row := 0
 	for {
@@ -276,7 +286,7 @@ func Read(r *csv.Reader, locs []godata.AddressLocation) ([]CovidTest, error) {
 		}
 
 		test := CovidTest{
-			ID:            record[0],
+			VisualID:      record[0],
 			Bhis:          bhisNumber,
 			ReportingDate: repDate,
 			CreatedAt:     createDate,
