@@ -2,29 +2,35 @@ package godata
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"io"
 	"strconv"
 	"time"
 )
 
+//const (
+//	layoutISO = "2006-01-02 00:00:00-07"
+//)
+
 const (
-	layoutISO = "2006-01-02 00:00:00-07"
+	layoutISO = "2006-01-02"
 )
 
 type QuestionnaireAnswer struct {
 	Value string `json:"value"`
 }
 
-type GoDataCaseForm struct {
+type CaseForm struct {
 	Value []string `json:"value"`
 }
 
 // GoDataQuestionnaire represents the GoData questionnaire. GoData stores these as a flat list.
 // The CaseForm identifies the forms, and GoData uses this to extract the fields for each form from the
 // flat list of questions.
-type GoDataQuestionnaire struct {
-	CaseForm                                      []GoDataCaseForm      `json:"Case_WhichForm"`
+type Questionnaire struct {
+	CaseForm                                      []CaseForm            `json:"Case_WhichForm"`
 	DataCollectorName                             []QuestionnaireAnswer `json:"FA0_datacollector_name"`
 	CountryResidence                              []QuestionnaireAnswer `json:"FA0_case_countryresidence"`
 	ShowsSymptoms                                 []QuestionnaireAnswer `json:"FA0_symptoms_caseshowssymptoms"`
@@ -49,6 +55,7 @@ type GoDataQuestionnaire struct {
 	BlurredVision                                 []QuestionnaireAnswer `json:"FA0_symptom_blurred_vision"`
 	AbdominalPain                                 []QuestionnaireAnswer `json:"FA0_symptom_abdominal_pain"`
 	CaseType                                      string                `json:"case_type"`
+	Ssn                                           []QuestionnaireAnswer `json:"FA0_caseidentifier_socialnumber"`
 	PriorXdayExposureTravelledInternationally     []QuestionnaireAnswer `json:"FA0_priorXdayexposure_travelledinternationally"`
 	PriorXdayExposureContactWithCase              []QuestionnaireAnswer `json:"FA0_priorXdayexposure_contactwithcase"`
 	PriorXDayexposureContactWithCaseDate          []QuestionnaireAnswer `json:"FA0_priorXdayexposure_contactwithcasedate"`
@@ -69,6 +76,7 @@ type GoDataQuestionnaire struct {
 
 const AddressType = "LNG_REFERENCE_DATA_CATEGORY_ADDRESS_TYPE_USUAL_PLACE_OF_RESIDENCE"
 const OtherAddressType = "LNG_REFERENCE_DATA_CATEGORY_ADDRESS_TYPE_OTHER"
+const ReportingFacility = "LNG_REFERENCE_DATA_CATEGORY_ADDRESS_TYPE_ACCOMMODATION_NAME"
 
 type GeoLocation struct {
 	Lat float32 `json:"lat"`
@@ -84,7 +92,7 @@ type Address struct {
 	Date         string       `json:"date"`
 	PhoneNumber  string       `json:"phoneNumber"`
 	LocationId   string       `json:"locationId"`
-	GeoLocation  *GeoLocation `json:"geoLocation"`
+	GeoLocation  *GeoLocation `json:"geoLocation,omitempty"`
 }
 
 type PersonAge struct {
@@ -142,25 +150,48 @@ func toOutcome(s string) (string, error) {
 }
 
 type CovidTest struct {
-	VisualID       string              `json:"visualId"`
-	Bhis           int                 `json:"bhis"`
-	ReportingDate  time.Time           `json:"dateOfReporting"`
-	CreatedAt      time.Time           `json:"createdAt"`
-	CreatedBy      string              `json:"createdBy"`
-	FirstName      string              `json:"firstName"`
-	LastName       string              `json:"lastName"`
-	Gender         string              `json:"gender"`
-	Occupation     string              `json:"occupation"`
-	Age            PersonAge           `json:"age"`
-	Classification string              `json:"classification"`
-	DateBecameCase *time.Time          `json:"dateBecomeCase"`
-	DateOfOnset    *time.Time          `json:"dateOfOnset"`
-	RiskLevel      string              `json:"riskLevel"`
-	RiskReason     string              `json:"riskReason"`
-	Outcome        string              `json:"outcome"`
-	DateOfOutcome  *time.Time          `json:"dateOfOutCome"`
-	Addresses      []Address           `json:"addresses"`
-	Questionnaire  GoDataQuestionnaire `json:"questionnaireAnswers,omitempty"`
+	VisualID         string            `json:"visualId"`
+	Bhis             int               `json:"bhis"`
+	ReportingDate    time.Time         `json:"dateOfReporting"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	CreatedBy        string            `json:"createdBy"`
+	FirstName        string            `json:"firstName"`
+	LastName         string            `json:"lastName"`
+	Gender           string            `json:"gender"`
+	Occupation       string            `json:"occupation"`
+	Age              PersonAge         `json:"age"`
+	Dob              time.Time         `json:"dob"`
+	Classification   string            `json:"classification"`
+	DateBecameCase   *time.Time        `json:"dateBecomeCase"`
+	DateOfOnset      *time.Time        `json:"dateOfOnset"`
+	RiskLevel        string            `json:"riskLevel"`
+	RiskReason       string            `json:"riskReason"`
+	Outcome          string            `json:"outcome"`
+	PregnancyStatus  string            `json:"pregnancyStatus"`
+	DateOfOutcome    *time.Time        `json:"dateOfOutCome"`
+	Addresses        []Address         `json:"addresses"`
+	Questionnaire    Questionnaire     `json:"questionnaireAnswers,omitempty"`
+	Hospitalizations []Hospitalization `json:"dateRanges,omitempty"`
+}
+
+// min finds the smallest number
+func min(a, b int) int {
+	if a <= b {
+		return a
+	}
+	return b
+}
+
+// SplitTests batches the CovidTests. This allows us to import the data in batches.
+// GoData will restart if it gets too much traffic. Batching the upload prevents us
+// from DOSing the GoData application.
+func SplitTests(t []CovidTest, batchSize int) [][]CovidTest {
+	var batch [][]CovidTest
+	for i := 0; i < len(t); i += batchSize {
+		bs := t[i:min(i+batchSize, len(t))]
+		batch = append(batch, bs)
+	}
+	return batch
 }
 
 func toCurrentAddress(r []string, locs []AddressLocation) (*Address, error) {
@@ -183,6 +214,24 @@ func toCurrentAddress(r []string, locs []AddressLocation) (*Address, error) {
 			Lat: float32(lat),
 			Lng: float32(lng),
 		},
+	}
+	return &addr, nil
+}
+
+func toReportingFacility(r []string, locs []AddressLocation) (*Address, error) {
+	loc := FindLocation(r[65], locs)
+	if loc == nil {
+		return nil, fmt.Errorf("invalid address %s", r[24])
+	}
+
+	addr := Address{
+		TypeId:       ReportingFacility,
+		Country:      "Belize",
+		City:         loc.Name,
+		AddressLine1: r[63],
+		AddressLine2: r[64],
+		Date:         "",
+		LocationId:   loc.Id,
 	}
 	return &addr, nil
 }
@@ -284,6 +333,54 @@ func Read(r *csv.Reader, locs []AddressLocation) ([]CovidTest, error) {
 		if otherAddrErr == nil && currentAddrErr == nil {
 			addresses = []Address{*currentAddress, *otherAddress}
 		}
+		reportingFacilityAddress, err := toReportingFacility(record, locs)
+		if err == nil && reportingFacilityAddress != nil {
+			addresses = append(addresses, *reportingFacilityAddress)
+		}
+		var hospitalizations []Hospitalization
+		h, err := toHospitalization(record, 68, locs)
+		var emptyHospErr1 *EmptyHospitalizationErr
+		if err != nil && errors.As(err, &emptyHospErr1) && emptyHospErr1 == nil {
+			return nil, fmt.Errorf("error parsing hospitalization(1): %w", err)
+		}
+		if len(h.TypeId) != 0 {
+			hospitalizations = append(hospitalizations, h)
+		}
+		h, err = toHospitalization(record, 77, locs)
+		var emptyHospErr2 *EmptyHospitalizationErr
+		if err != nil && errors.As(err, &emptyHospErr2) && emptyHospErr2 == nil {
+			return nil, fmt.Errorf("error parsing hospitalization(2): %w", err)
+		}
+		if len(h.TypeId) != 0 {
+			hospitalizations = append(hospitalizations, h)
+		}
+		h, err = toHospitalization(record, 86, locs)
+		var emptyHospErr3 *EmptyHospitalizationErr
+		if err != nil && errors.As(err, &emptyHospErr3) && emptyHospErr3 == nil {
+			return nil, fmt.Errorf("error parsing hospitalization(3): %w", err)
+		}
+		if len(h.TypeId) != 0 {
+			hospitalizations = append(hospitalizations, h)
+		}
+
+		var emptyHospErr4 *EmptyHospitalizationErr
+		h, err = toHospitalization(record, 95, locs)
+		if err != nil && errors.As(err, &emptyHospErr4) && emptyHospErr4 == nil {
+			return nil, fmt.Errorf("error parsing hospitalization(4): %w", err)
+		}
+		if len(h.TypeId) != 0 {
+			hospitalizations = append(hospitalizations, h)
+		}
+
+		dob, err := time.Parse(layoutISO, record[104])
+		if err != nil {
+			return nil, fmt.Errorf("record (bhis:%s | row:%d | value:%s) does not have a date of birth", record[0], row, record[104])
+		}
+
+		pregnancyStatus, pregnancyErr := ToPregnancy(record[38])
+		if record[9] == "Male" {
+			pregnancyStatus = PregnancyNotApplicable
+		}
 
 		test := CovidTest{
 			VisualID:      record[0],
@@ -298,20 +395,35 @@ func Read(r *csv.Reader, locs []AddressLocation) ([]CovidTest, error) {
 				Years:  ageYears,
 				Months: ageMonths,
 			},
-			Classification: classification,
-			DateBecameCase: &dateBecameCase,
-			DateOfOnset:    dateOfOnset,
-			RiskLevel:      toRiskLevel(record[18]),
-			RiskReason:     record[19],
-			Outcome:        outcome,
-			DateOfOutcome:  dateOfOutcome,
-			Addresses:      addresses,
-			Questionnaire:  toQuestionnaire(record),
+			Dob:              dob,
+			Classification:   classification,
+			DateBecameCase:   &dateBecameCase,
+			DateOfOnset:      dateOfOnset,
+			RiskLevel:        toRiskLevel(record[18]),
+			RiskReason:       record[19],
+			Outcome:          outcome,
+			DateOfOutcome:    dateOfOutcome,
+			PregnancyStatus:  string(pregnancyStatus),
+			Addresses:        addresses,
+			Questionnaire:    toQuestionnaire(record),
+			Hospitalizations: hospitalizations,
 		}
-		if currentAddrErr == nil && otherAddrErr == nil {
+		if currentAddrErr != nil || otherAddrErr != nil || pregnancyErr != nil {
+			log.WithFields(log.Fields{
+				"error":          currentAddrErr,
+				"otherAddr":      otherAddrErr,
+				"pregnancyError": pregnancyErr,
+				"row":            row,
+			}).Error("no address")
+		}
+		if currentAddrErr == nil && otherAddrErr == nil && pregnancyErr == nil {
 			tests = append(tests, test)
 		}
 
 	}
+	log.WithFields(log.Fields{
+		"numberRows":  row,
+		"numberTests": len(tests),
+	}).Info("Parsed")
 	return tests, nil
 }
