@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -71,6 +72,7 @@ type Questionnaire struct {
 	PostMortem                                    []QuestionnaireAnswer `json:"FA2_outcome_postmortemperformed"`
 	CauseOfDeath                                  []QuestionnaireAnswer `json:"FA2_symptoms_causeofdeath"`
 	RespSampleCollected                           []QuestionnaireAnswer `json:"FA0_respiratorysample_collectedYN"`
+	RespiratorySampleDateCollected                []QuestionnaireAnswer `json:"FA0_respiratorysample_datecollected"`
 	MechanicalVentilation                         []QuestionnaireAnswer `json:"FA0_clinicalcomplications_mechanicalventilation"`
 }
 
@@ -133,22 +135,6 @@ func toRiskLevel(s string) string {
 	}
 }
 
-func toOutcome(s string) (string, error) {
-	switch s {
-	case "Active":
-		return "LNG_REFERENCE_DATA_CATEGORY_OUTCOME_ACTIVE", nil
-	case "Alive":
-		return "LNG_REFERENCE_DATA_CATEGORY_OUTCOME_ALIVE", nil
-	case "Deceased":
-		return "", nil
-	case "Recovered":
-		return "LNG_REFERENCE_DATA_CATEGORY_OUTCOME_RECOVERED", nil
-	default:
-		return "", fmt.Errorf("invalid classification")
-
-	}
-}
-
 type CovidTest struct {
 	VisualID         string            `json:"visualId"`
 	Bhis             int               `json:"bhis"`
@@ -166,9 +152,9 @@ type CovidTest struct {
 	DateOfOnset      *time.Time        `json:"dateOfOnset"`
 	RiskLevel        string            `json:"riskLevel"`
 	RiskReason       string            `json:"riskReason"`
-	Outcome          string            `json:"outcome"`
+	Outcome          string            `json:"outcomeId"`
 	PregnancyStatus  string            `json:"pregnancyStatus"`
-	DateOfOutcome    *time.Time        `json:"dateOfOutCome"`
+	DateOfOutcome    *time.Time        `json:"dateOfOutcome"`
 	Addresses        []Address         `json:"addresses"`
 	Questionnaire    Questionnaire     `json:"questionnaireAnswers,omitempty"`
 	Hospitalizations []Hospitalization `json:"dateRanges,omitempty"`
@@ -271,9 +257,13 @@ func Read(r *csv.Reader, locs []AddressLocation) ([]CovidTest, error) {
 		}
 		row = row + 1
 		if err != nil {
-			return nil, fmt.Errorf("error reading the csv file: %w", err)
+			return nil, fmt.Errorf("error reading the csv file: %w | row: %d", err, row)
 		}
 		//fmt.Println(record)
+		if len(record) == 1 {
+			record = strings.Split(record[0], ",")
+		}
+
 		bhisNumber, err := strconv.Atoi(record[1])
 		if err != nil {
 			return nil, fmt.Errorf("error parsing the bhis number for: %s (%w)", record[1], err)
@@ -381,6 +371,7 @@ func Read(r *csv.Reader, locs []AddressLocation) ([]CovidTest, error) {
 		if record[9] == "Male" {
 			pregnancyStatus = PregnancyNotApplicable
 		}
+		gender, genderErr := toGender(record[9])
 
 		test := CovidTest{
 			VisualID:      record[0],
@@ -389,7 +380,7 @@ func Read(r *csv.Reader, locs []AddressLocation) ([]CovidTest, error) {
 			CreatedAt:     createDate,
 			FirstName:     record[7],
 			LastName:      record[8],
-			Gender:        record[9],
+			Gender:        string(gender),
 			Occupation:    record[10],
 			Age: PersonAge{
 				Years:  ageYears,
@@ -401,18 +392,19 @@ func Read(r *csv.Reader, locs []AddressLocation) ([]CovidTest, error) {
 			DateOfOnset:      dateOfOnset,
 			RiskLevel:        toRiskLevel(record[18]),
 			RiskReason:       record[19],
-			Outcome:          outcome,
+			Outcome:          string(outcome),
 			DateOfOutcome:    dateOfOutcome,
 			PregnancyStatus:  string(pregnancyStatus),
 			Addresses:        addresses,
 			Questionnaire:    toQuestionnaire(record),
 			Hospitalizations: hospitalizations,
 		}
-		if currentAddrErr != nil || otherAddrErr != nil || pregnancyErr != nil {
+		if currentAddrErr != nil || otherAddrErr != nil || pregnancyErr != nil || genderErr != nil {
 			log.WithFields(log.Fields{
 				"error":          currentAddrErr,
 				"otherAddr":      otherAddrErr,
 				"pregnancyError": pregnancyErr,
+				"genderError":    genderErr,
 				"row":            row,
 			}).Error("no address")
 		}

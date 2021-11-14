@@ -100,7 +100,7 @@ func PostTest(token, outbreak string, test CovidTest) error {
 		if putResp.StatusCode != http.StatusOK {
 			log.WithFields(log.Fields{
 				"statusCode": putResp.StatusCode,
-				"case":       test,
+				"case":       test.VisualID,
 			}).Info("failure when updating")
 		}
 

@@ -61,13 +61,14 @@ func toQuestionnaire(r []string) Questionnaire {
 		PriorXdayExposureInternationalDatetravelTo:    []QuestionnaireAnswer{{Value: r[55]}},
 		PriorXdayexposureInternationaltravelcountries: []QuestionnaireAnswer{{Value: r[56]}},
 		PriorXdayExposureInternationalTravelCities:    []QuestionnaireAnswer{},
-		TypeOfTraveller:      []QuestionnaireAnswer{},
-		PurposeOfTravel:      []QuestionnaireAnswer{},
-		FlightNumber:         []QuestionnaireAnswer{},
-		PcrTestInPast72Hours: []QuestionnaireAnswer{},
-		DeathContrib:         []QuestionnaireAnswer{{Value: r[59]}},
-		PostMortem:           []QuestionnaireAnswer{{Value: r[60]}},
-		CauseOfDeath:         []QuestionnaireAnswer{{Value: r[61]}},
+		TypeOfTraveller:                []QuestionnaireAnswer{},
+		PurposeOfTravel:                []QuestionnaireAnswer{},
+		FlightNumber:                   []QuestionnaireAnswer{},
+		PcrTestInPast72Hours:           []QuestionnaireAnswer{},
+		DeathContrib:                   []QuestionnaireAnswer{{Value: r[59]}},
+		PostMortem:                     []QuestionnaireAnswer{{Value: r[60]}},
+		CauseOfDeath:                   []QuestionnaireAnswer{{Value: r[61]}},
+		RespiratorySampleDateCollected: []QuestionnaireAnswer{{Value: r[105]}},
 	}
 
 	return q

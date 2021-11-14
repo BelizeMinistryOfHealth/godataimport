@@ -40,10 +40,10 @@ func GetLocations(token string) ([]AddressLocation, error) {
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
-	defer resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("error fetching locations: %+v", err)
 	}
+	defer resp.Body.Close()
 	var a []AddressLocation
 
 	if err := json.NewDecoder(resp.Body).Decode(&a); err != nil {
@@ -65,10 +65,6 @@ func GetLocations(token string) ([]AddressLocation, error) {
 }
 
 type GoDataAuthResponse struct {
-	Response goDataAuthResponseBody `json:"response"`
-}
-
-type goDataAuthResponseBody struct {
 	AccessToken string `json:"access_token"`
 }
 
@@ -84,6 +80,7 @@ func GetToken(username, password string) (*GoDataAuthResponse, error) {
 		log.WithFields(log.Fields{"error": err}).Error("Error retrieving token from GoData")
 		return nil, err
 	}
+	defer req.Body.Close()
 
 	var authResp *GoDataAuthResponse
 

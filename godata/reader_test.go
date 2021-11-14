@@ -8,21 +8,20 @@ import (
 	"testing"
 )
 
-const username = "epidemiologyunit@health.gov.bz"
-const password = "4ycu6VKWzAvAUCS"
-
 func TestRead(t *testing.T) {
+	username := os.Getenv("GODATA_USER")
+	password := os.Getenv("GODATA_PASSWORD")
 	// Get GoData Token
 	authResp, err := GetToken(username, password)
 	if err != nil {
 		t.Fatalf("auth failed: %+v", err)
 	}
-	locs, err := GetLocations(authResp.Response.AccessToken)
+	locs, err := GetLocations(authResp.AccessToken)
 	if err != nil {
 		t.Fatalf("error retrieving locations %+v", err)
 	}
 
-	csvFile, err := os.Open("COVID19_godata_1.csv")
+	csvFile, err := os.Open("../COVID19_godata_1.csv")
 	if err != nil {
 		t.Fatalf("failed to open csv file: %+v", err)
 	}
@@ -31,15 +30,9 @@ func TestRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse csv file: %+v", err)
 	}
-	//t.Log(tests)
-	//jsonFile, _ := os.OpenFile("20201203.json", os.O_CREATE, os.ModePerm)
-	//defer jsonFile.Close()
-	//err = json.NewEncoder(jsonFile).Encode(tests)
-	//if err != nil {
-	//	t.Fatalf("failed to write to json: %+v", err)
-	//}
+
 	jsonFile, _ := json.MarshalIndent(tests, "", "")
-	err = ioutil.WriteFile("2020-12-03.json", jsonFile, os.ModePerm)
+	err = ioutil.WriteFile("2021-01-09.json", jsonFile, os.ModePerm)
 	if err != nil {
 		t.Fatalf("failed to write to json: %+v", err)
 	}

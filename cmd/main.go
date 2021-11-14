@@ -78,9 +78,9 @@ func main() {
 	log.WithFields(log.Fields{"numberOfTests": len(tests)}).Info("importing cases....")
 	testBatches := godata.SplitTests(tests, 1000)
 	// Post To GoData
-	for _, tb := range testBatches {
+	for batchIndex, tb := range testBatches {
 		for _, t := range tb {
-			err := godata.PostTest(authResp.Response.AccessToken, outbreak, t)
+			err := godata.PostTest(authResp.AccessToken, outbreak, t)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"bhisNumber": t.Bhis,
@@ -91,16 +91,19 @@ func main() {
 		// Pausing in between batches so we don't cause a DOS
 		time.Sleep(5 * time.Second)
 		log.WithFields(log.Fields{
-			"total": len(tb),
+			"total":        len(tb),
+			"batchIndex":   batchIndex,
+			"totalBatches": len(testBatches),
 		}).Info("Imported cases")
 	}
 	log.WithFields(log.Fields{
-		"total": len(tests),
+		"total":        len(tests),
+		"totalBatches": len(testBatches),
 	}).Info("Done.")
 }
 
 func parseFile(fileName, destFile string, authResp *godata.GoDataAuthResponse) ([]godata.CovidTest, error) {
-	locs, err := godata.GetLocations(authResp.Response.AccessToken)
+	locs, err := godata.GetLocations(authResp.AccessToken)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving locations %w", err)
 	}
@@ -111,6 +114,7 @@ func parseFile(fileName, destFile string, authResp *godata.GoDataAuthResponse) (
 		return nil, fmt.Errorf("failed to open csv file: %w", err)
 	}
 	r := csv.NewReader(csvFile)
+	r.Comma = '|'
 	tests, err := godata.Read(r, locs)
 	if err != nil {
 		log.WithFields(log.Fields{
